@@ -74,6 +74,16 @@ def save_transactions():
         logger.error(f"Error saving transactions: {str(e)}")
         st.error("Error saving transactions.")
 
+# Download CSV
+def download_csv():
+    csv = st.session_state.transactions.to_csv(index=False)
+    st.download_button(
+        label="Download Transactions CSV",
+        data=csv,
+        file_name="transactions.csv",
+        mime="text/csv"
+    )
+
 # Calculate summary
 def calculate_summary(df):
     summary = []
@@ -331,89 +341,54 @@ else:
         bar_fig.update_layout({"paper_bgcolor": "black", "plot_bgcolor": "black", "font_color": "white"})
         st.plotly_chart(bar_fig)
     
-    # Export to PDF
+    # Export to PDF and CSV
     st.subheader("Export")
     if not st.session_state.transactions.empty:
-        export_to_pdf(st.session_state.transactions)
+        col_pdf, col_csv = st.columns(2)
+        with col_pdf:
+            export_to_pdf(st.session_state.transactions)
+        with col_csv:
+            download_csv()
 
 # Run app only if main
 if __name__ == "__main__":
     st.write("")
 ```
 
-### Key Changes
-1. **Robust Date Parsing**:
-   - `pd.to_datetime` now uses `errors='coerce'` to convert invalid dates to `NaT`.
-   - Rows with invalid dates are dropped, and a warning is displayed to the user.
-   - Logging captures invalid date entries for debugging.
-
-2. **Date Format Consistency**:
-   - Dates are saved to `transactions.csv` in `YYYY-MM-DD` format using `dt.strftime('%Y-%m-%d')` in `save_transactions`.
-
-3. **Error Handling**:
-   - Added try-except blocks in `load_transactions`, `save_transactions`, and `export_to_pdf` to catch and log errors, displaying user-friendly messages.
-   - Added logging to track issues in Streamlit Cloud logs.
-
-4. **Improved Filter Handling**:
-   - Ensured the date range filter defaults to the current date if the DataFrame is empty to avoid errors.
-
-5. **Notes Field Handling**:
-   - Added a check for `NaN` in the Notes field when editing to prevent errors with missing values.
-
-### Debugging the CSV
-To identify the specific issue with `transactions.csv`:
-1. **Check the CSV Content**:
-   - Download `transactions.csv` from your Streamlit Cloud app (via the "Manage app" interface or GitHub).
-   - Open it in a text editor or spreadsheet software.
-   - Look at the "Receiving Date" column for entries that don’t match a standard date format (e.g., `YYYY-MM-DD`, `DD/MM/YYYY`, or empty cells).
-
-2. **Fix the CSV**:
-   - Ensure all dates in the "Receiving Date" column are in a consistent format (e.g., `2025-06-25`).
-   - Remove or correct any invalid entries (e.g., empty cells, text like "N/A", or malformed dates).
-   - Example of a valid `transactions.csv`:
-     ```
-     Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
-     1,2025-06-01,Cheque,Ju Jitsu Asian Championship,Marketing,255000,8.5,Travel expenses
-     2,2025-06-15,Cheque,Gear Purchased,Gear and Equipment,126559,25.31,Thailand gear
-     ```
-
-3. **Recreate the CSV**:
-   - If the CSV is corrupted or has many invalid entries, replace it with an empty CSV containing only the headers:
-     ```
-     Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
-     ```
-   - The app will initialize an empty DataFrame and allow you to add new transactions.
-
 ### Deployment Instructions
 1. **Update Your Repository**:
-   - Replace the existing `app.py` (or `maincode.py`) with the updated code above.
-   - Ensure `requirements.txt` contains:
+   - Replace `app.py` (or `maincode.py`) with the updated code above.
+   - Ensure `requirements.txt` includes:
      ```
      streamlit
      pandas
      plotly
      reportlab
      ```
-   - If `transactions.csv` is problematic, replace it with an empty CSV with the correct headers (as shown above).
+   - Add a `.gitignore` file to exclude `transactions.csv`:
+     ```
+     transactions.csv
+     ```
+   - If you need to initialize `transactions.csv` for the first deployment, include an empty CSV with headers:
+     ```
+     Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
+     ```
+   - Push the changes to your GitHub repository.
 
-2. **Push to GitHub**:
-   - Commit and push the updated files to your GitHub repository.
-
-3. **Redeploy on Streamlit Cloud**:
+2. **Redeploy on Streamlit Cloud**:
    - Log in to [Streamlit Cloud](https://cloud.streamlit.io).
-   - Go to "Manage app" for your app, trigger a redeploy, or update the repository link if needed.
-   - Check the app logs in Streamlit Cloud to see any warnings about invalid dates.
+   - Go to “Manage app” for your app and trigger a redeploy.
+   - Verify that the app loads existing transactions from `transactions.csv` (if it exists in the cloud environment).
 
-4. **Test the App**:
+3. **Test the App**:
    - Access the app using the Streamlit Cloud URL.
    - Log in with username `bano` and password `pso2025`.
-   - Add a test transaction to verify that dates are saved correctly.
-   - Check the logs for any warnings about invalid dates from the old CSV.
+   - Add a test transaction and use the “Download Transactions CSV” button to verify that transactions are saved correctly.
+   - Check that existing transactions persist after redeployment.
 
-### Additional Notes
-- **Login Credentials**: Use `bano` and `pso2025` to log in.
-- **Streamlit Cloud Logs**: Check the logs in "Manage app" to see details about invalid date entries (logged as warnings).
-- **Preventing Future Issues**: The updated script enforces consistent date formats when saving transactions, so new entries should not cause this error.
-- **Local Testing**: Before redeploying, test locally with `streamlit run app.py` to ensure the CSV loads correctly. If you have the problematic `transactions.csv`, test it locally to reproduce and fix the issue.
+### Recommendations
+- **Exclude `transactions.csv` from GitHub**: Add it to `.gitignore` to prevent accidental overwrites. This ensures that transactions entered via the app are preserved in the Streamlit Cloud environment.
+- **Regular Backups**: Use the new “Download Transactions CSV” button to periodically back up `transactions.csv` to your local machine.
+- **Monitor Logs**: After redeployment, check Streamlit Cloud logs for any errors related to `transactions.csv` or other issues.
 
-If the error persists or you need help inspecting `transactions.csv`, please share the content of the CSV (or a sample of the problematic rows) or the Streamlit Cloud logs, and I’ll assist further!
+If you’re concerned about specific transactions or need help checking the current state of `transactions.csv` in Streamlit Cloud, let me know, and I can guide you on accessing or debugging it!
