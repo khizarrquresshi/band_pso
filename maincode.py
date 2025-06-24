@@ -169,3 +169,88 @@ with tab3:
         file_name="bano_funds_report.pdf",
         mime="application/pdf"
     )
+import matplotlib.pyplot as plt
+import tempfile
+
+def generate_pdf(transactions_df, summary_df):
+    from fpdf import FPDF
+    from io import BytesIO
+
+    # Prepare summary for charts
+    overall = summary_df[summary_df["Year"] == "Total"].copy()
+    categories = overall["Category"].tolist()
+    used = overall["Used"].astype(float).tolist()
+    remaining = overall["Remaining"].astype(float).tolist()
+    budgets = overall["Budget"].astype(float).tolist()
+
+    # Create Pie Chart of Used Funds
+    fig1, ax1 = plt.subplots()
+    ax1.pie(used, labels=categories, autopct='%1.1f%%', startangle=90)
+    ax1.axis('equal')
+    pie_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+    fig1.savefig(pie_path, bbox_inches="tight")
+    plt.close(fig1)
+
+    # Create Bar Chart of Budget vs Used vs Remaining
+    x = range(len(categories))
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    ax2.bar(x, budgets, width=0.25, label="Budget", color='gray')
+    ax2.bar([i + 0.25 for i in x], used, width=0.25, label="Used", color='red')
+    ax2.bar([i + 0.5 for i in x], remaining, width=0.25, label="Remaining", color='green')
+    ax2.set_xticks([i + 0.25 for i in x])
+    ax2.set_xticklabels(categories, rotation=45, ha='right')
+    ax2.legend()
+    ax2.set_ylabel("Amount (PKR)")
+    bar_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+    fig2.tight_layout()
+    fig2.savefig(bar_path)
+    plt.close(fig2)
+
+    # PDF Setup
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+
+    # Logo
+    logo_path = "./749475bc-71ad-470d-a6d5-abb42854ddc5.png"
+    if os.path.exists(logo_path):
+        pdf.image(logo_path, x=80, w=50)
+        pdf.ln(10)
+
+    pdf.cell(200, 10, txt="Bano Butt – PSO Funds Report", ln=True, align='C')
+    pdf.ln(5)
+
+    # Charts Section
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(200, 10, txt="Visual Summary", ln=True)
+    pdf.image(pie_path, w=160)
+    pdf.ln(5)
+    pdf.image(bar_path, w=180)
+    pdf.ln(5)
+
+    # Transactions Section
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(200, 10, txt="Transactions", ln=True)
+    pdf.set_font("Arial", "", 9)
+    for idx, row in transactions_df.iterrows():
+        line = f"{row['Date'].strftime('%Y-%m-%d')} | {row['Description']} | ₨ {row['Amount']:,.0f} | {row['Category']} | {row['Method']}"
+        pdf.multi_cell(0, 8, line)
+
+    pdf.ln(5)
+    # Summary Table
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(200, 10, txt="Summary", ln=True)
+    pdf.set_font("Arial", "", 9)
+    for idx, row in summary_df.iterrows():
+        line = (
+            f"{row['Year']} – {row['Category']} | Used: ₨ {row['Used']:,.0f} "
+            f"/ Budget: ₨ {row['Budget']:,.0f} | Remaining: ₨ {row['Remaining']:,.0f} "
+            f"({row['Remaining %']}%)"
+        )
+        pdf.multi_cell(0, 8, line)
+
+    pdf_output = BytesIO()
+    pdf.output(pdf_output)
+    pdf_output.seek(0)
+    return pdf_output
+
