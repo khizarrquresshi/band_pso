@@ -1,170 +1,343 @@
 import streamlit as st
 import pandas as pd
-import os
+import plotly.express as px
 from datetime import datetime
-from fpdf import FPDF
-import matplotlib.pyplot as plt
-from io import BytesIO
-import tempfile
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 
-st.set_page_config(page_title="Bano Butt PSO Funds Dashboard", layout="wide")
-
-# ---- CONSTANTS ---- #
-CATEGORIES = {
-    "Marketing/Advertisement": 3000000,
-    "Gear and Expenses": 500000,
+# Fixed budgets
+BUDGETS = {
+    "Marketing": 3000000,
+    "Gear and Equipment": 500000,
     "PSO Fuel Card": 500000,
-    "Tournament Winning Prize": 1000000,
-    "International Tournament Support": 1000000,
+    "Winning Prize": 1000000,
+    "International Tournament": 1000000
 }
 
-METHODS = ["Bank Transfer", "Cheque", "Fuel Card Update"]
-EXCEL_FILE = "transactions.xlsx"
-LOGO_FILE = "749475bc-71ad-470d-a6d5-abb42854ddc5.png"
+# CSV file for transactions
+CSV_FILE = "transactions.csv"
 
-# ---- Initialize Excel ---- #
-if not os.path.exists(EXCEL_FILE):
-    df_init = pd.DataFrame(columns=["Date", "Description", "Amount", "Category", "Method"])
-    df_init.to_excel(EXCEL_FILE, index=False)
+# Initialize session state
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'transactions' not in st.session_state:
+    st.session_state.transactions = pd.DataFrame(columns=[
+        "Sr. No", "Receiving Date", "Payment Method", "Description", 
+        "Category", "Amount", "% of Funds Used", "Notes"
+    ])
 
-# ---- Load Data ---- #
-df = pd.read_excel(EXCEL_FILE, engine="openpyxl")
-df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
+# Load transactions from CSV
+def load_transactions():
+    if os.path.exists(CSV_FILE):
+        df = pd.read_csv(CSV_FILE)
+        df["Receiving Date"] = pd.to_datetime(df["Receiving Date"])
+        st.session_state.transactions = df
+    else:
+        st.session_state.transactions = pd.DataFrame(columns=[
+            "Sr. No", "Receiving Date", "Payment Method", "Description", 
+            "Category", "Amount", "% of Funds Used", "Notes"
+        ])
 
-# ---- Add Transaction ---- #
-st.sidebar.header("Add Transaction")
-desc = st.sidebar.text_input("Description")
-amount = st.sidebar.number_input("Amount", min_value=0.0, step=100.0, format="%.2f")
-category = st.sidebar.selectbox("Category", CATEGORIES.keys())
-method = st.sidebar.selectbox("Method", METHODS)
-date = st.sidebar.date_input("Date", value=datetime.today())
+# Save transactions to CSV
+def save_transactions():
+    st.session_state.transactions.to_csv(CSV_FILE, index=False)
 
-if st.sidebar.button("Add Transaction"):
-    new_row = pd.DataFrame([{"Date": date, "Description": desc, "Amount": amount, "Category": category, "Method": method}])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_excel(EXCEL_FILE, index=False)
-    st.sidebar.success("Transaction added!")
-
-# ---- Summary Calculation ---- #
-def generate_summary(df):
+# Calculate summary
+def calculate_summary(df):
     summary = []
-    for cat, total_budget in CATEGORIES.items():
-        cat_df = df[df['Category'] == cat]
-        used_total = cat_df['Amount'].sum()
-        year1 = df['Date'].dt.year.min()
-        used_y1 = cat_df[cat_df['Date'].dt.year == year1]['Amount'].sum()
-
+    total_budget = sum(BUDGETS.values())
+    total_used = 0
+    for category, budget in BUDGETS.items():
+        cat_df = df[df["Category"] == category]
+        used = cat_df["Amount"].sum()
+        remaining = budget - used
+        percent_used = (used / budget * 100) if budget > 0 else 0
+        percent_remaining = 100 - percent_used
+        total_used += used
         summary.append({
-            "Year": "Year 1",
-            "Category": cat,
-            "Budget": total_budget / 2,
-            "Used": used_y1,
-            "Remaining": total_budget / 2 - used_y1,
-            "Remaining %": round((1 - used_y1 / (total_budget / 2)) * 100, 2)
+            "Category": category,
+            "Total Budget (PKR)": budget,
+            "Used (PKR)": used,
+            "Remaining (PKR)": remaining,
+            "% Used": round(percent_used, 2),
+            "% Remaining": round(percent_remaining, 2)
         })
-
-        summary.append({
-            "Year": "Total",
-            "Category": cat,
-            "Budget": total_budget,
-            "Used": used_total,
-            "Remaining": total_budget - used_total,
-            "Remaining %": round((1 - used_total / total_budget) * 100, 2)
-        })
-
+    summary.append({
+        "Category": "Total",
+        "Total Budget (PKR)": total_budget,
+        "Used (PKR)": total_used,
+        "Remaining (PKR)": total_budget - total_used,
+        "% Used": round(total_used / total_budget * 100, 2) if total_budget > 0 else 0,
+        "% Remaining": round((total_budget - total_used) / total_budget * 100, 2) if total_budget > 0 else 0
+    })
     return pd.DataFrame(summary)
 
-summary_df = generate_summary(df)
-df_sorted = df.sort_values("Date", ascending=False)
+# Export to PDF
+def export_to_pdf(df):
+    pdf_file = "Bano_Funds_Tracker.pdf"
+    doc = SimpleDocTemplate(pdf_file, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph("Bano Funds Tracker", styles['Title']))
+    
+    # Transactions table
+    data = [df.columns.tolist()] + df.values.tolist()
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.black),
+        ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.green)
+    ]))
+    elements.append(table)
+    
+    # Summary table
+    summary_df = calculate_summary(df)
+    elements.append(Paragraph("Summary", styles['Heading2']))
+    data = [summary_df.columns.tolist()] + summary_df.values.tolist()
+    table = Table(data)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.black),
+        ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.green)
+    ]))
+    elements.append(table)
+    
+    doc.build(elements)
+    with open(pdf_file, 'rb') as f:
+        st.download_button("Download PDF", f, file_name=pdf_file)
 
-# ---- Dashboard ---- #
-st.title("🏆 Bano Butt PSO Funds Dashboard")
+# Custom CSS for theme
+st.markdown("""
+    <style>
+    body, .stApp {
+        background-color: #000000;
+        color: #FFFFFF;
+    }
+    .stButton > button {
+        background-color: #00FF00;
+        color: #000000;
+    }
+    .stTextInput > div > div > input, .stSelectbox > div > div > select, .stDateInput > div > div > input {
+        background-color: #1C2526;
+        color: #FFFFFF;
+        border-color: #00FF00;
+    }
+    .stDataFrame, .stTable {
+        background-color: #1C2526;
+        color: #FFFFFF;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        color: #00FF00;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("Year 1 Summary")
-    st.dataframe(summary_df[summary_df['Year'] == "Year 1"].style.format({"Budget": "{:,.0f}", "Used": "{:,.0f}", "Remaining": "{:,.0f}"}))
+# Login page
+if not st.session_state.logged_in:
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username == "bano" and password == "pso2025":
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+else:
+    # Load transactions
+    load_transactions()
+    
+    st.title("Bano Funds Tracker")
+    
+    # Add transaction
+    with st.form("add_transaction"):
+        st.subheader("Add Transaction")
+        date = st.date_input("Receiving Date")
+        payment_method = st.selectbox("Payment Method", ["Cheque", "Deposit"])
+        description = st.text_input("Description")
+        category = st.selectbox("Category", list(BUDGETS.keys()))
+        amount = st.number_input("Amount (PKR)", min_value=0.0)
+        notes = st.text_area("Notes")
+        submit = st.form_submit_button("Add Transaction")
+        
+        if submit:
+            if description and description.strip():
+                percent_used = (amount / BUDGETS[category] * 100) if BUDGETS[category] > 0 else 0
+                new_row = {
+                    "Sr. No": len(st.session_state.transactions) + 1,
+                    "Receiving Date": date,
+                    "Payment Method": payment_method,
+                    "Description": description,
+                    "Category": category,
+                    "Amount": amount,
+                    "% of Funds Used": round(percent_used, 2),
+                    "Notes": notes
+                }
+                st.session_state.transactions = pd.concat(
+                    [st.session_state.transactions, pd.DataFrame([new_row])],
+                    ignore_index=True
+                )
+                save_transactions()
+                st.success("Transaction added!")
+            else:
+                st.error("Description cannot be empty!")
+    
+    # Display transactions
+    st.subheader("Transaction Ledger")
+    df = st.session_state.transactions.copy()
+    
+    # Filters
+    with st.expander("Apply Filters"):
+        categories = ["All"] + list(BUDGETS.keys())
+        selected_category = st.selectbox("Filter by Category", categories)
+        payment_methods = ["All"] + list(df["Payment Method"].unique())
+        selected_method = st.selectbox("Filter by Payment Method", payment_methods)
+        date_range = st.date_input("Date Range", [df["Receiving Date"].min(), df["Receiving Date"].max()])
+        
+        if selected_category != "All":
+            df = df[df["Category"] == selected_category]
+        if selected_method != "All":
+            df = df[df["Payment Method"] == selected_method]
+        if date_range and len(date_range) == 2:
+            df = df[(df["Receiving Date"] >= pd.to_datetime(date_range[0])) & 
+                    (df["Receiving Date"] <= pd.to_datetime(date_range[1]))]
+    
+    # Display filtered transactions
+    st.dataframe(df, use_container_width=True)
+    
+    # Edit/Delete transactions
+    if not df.empty:
+        st.subheader("Edit/Delete Transaction")
+        sr_no = st.selectbox("Select Sr. No to Edit/Delete", df["Sr. No"])
+        selected_row = df[df["Sr. No"] == sr_no].iloc[0]
+        
+        with st.form("edit_transaction"):
+            edit_date = st.date_input("Edit Date", selected_row["Receiving Date"])
+            edit_payment_method = st.selectbox("Edit Payment Method", ["Cheque", "Deposit"], 
+                                              index=["Cheque", "Deposit"].index(selected_row["Payment Method"]))
+            edit_description = st.text_input("Edit Description", selected_row["Description"])
+            edit_category = st.selectbox("Edit Category", list(BUDGETS.keys()), 
+                                        index=list(BUDGETS.keys()).index(selected_row["Category"]))
+            edit_amount = st.number_input("Edit Amount (PKR)", min_value=0.0, value=float(selected_row["Amount"]))
+            edit_notes = st.text_area("Edit Notes", selected_row["Notes"])
+            col_edit, col_delete = st.columns(2)
+            edit_submit = col_edit.form_submit_button("Update Transaction")
+            delete_submit = col_delete.form_submit_button("Delete Transaction")
+            
+            if edit_submit:
+                if edit_description.strip():
+                    percent_used = (edit_amount / BUDGETS[edit_category] * 100) if BUDGETS[edit_category] > 0 else 0
+                    st.session_state.transactions.loc[
+                        st.session_state.transactions["Sr. No"] == sr_no,
+                        ["Receiving Date", "Payment Method", "Description", "Category", "Amount", "% of Funds Used", "Notes"]]
+                    ] = [
+                        edit_date, edit_payment_method, edit_description, edit_category,
+                        edit_amount, round(percent_used, 2), edit_notes
+                    ]
+                    save_transactions()
+                    st.success("Transaction updated!")
+                    st.rerun()
+                else:
+                    st.error("Description cannot be empty!")
+            
+            if delete_submit:
+                st.session_state.transactions = st.session_state.transactions[
+                    st.session_state.transactions["Sr. No"] != sr_no]
+                st.session_state.transactions["Sr. No"] = range(1, len(st.session_state.transactions) + 1))
+                save_transactions()
+                st.success("Transaction deleted!")
+                st.rerun()
+    
+    # Summary table
+    st.subheader("Funds Summary")
+    summary_df = calculate_summary(st.session_state.transactions)
+    st.dataframe(summary_df, use_container_width=True)
+    
+    # Visualizations
+    st.subheader("Visualizations")
+    view_type = st.selectbox("View Funds By", ["Total", "Yearly", "Quarterly"])
+    
+    # Pie chart for category spending
+    pie_fig = px.pie(summary_df[:-1], values="Used (PKR)", names="Category", 
+                      title="Category-wise Funds Usage", color_discrete_sequence=px.colors.sequential.Greens)
+    pie_fig.update_layout({"paper_bgcolor": "black", "plot_bgcolor": "black", "font_color": "white"})
+    st.plotly_chart(pie_fig)
+    
+    # Bar chart for quarterly/yearly usage
+    if not st.session_state.transactions.empty:
+        df = st.session_state.transactions.copy()
+        df["Year"] = df["Receiving Date"].dt.year
+        if view_type == "Quarterly":
+            df["Quarter"] = df["Receiving Date"].dt.quarter
+            group_df = df.groupby(["Year", "Category"])["Amount"].sum().reset_index()
+            group_df["Period"] = group_df["Year"].astype(str) + " Q" + group_df["Quarter"].astype(str)
+            bar_fig = px.bar(group_df, x="Period", y="Amount", color="Category", 
+                            title="Funds Usage by Quarter", color_discrete_sequence=px.colors.sequential.Greens)
+        else:
+            group_df = df.groupby(["Year", "Category"])["Amount"].sum().reset_index()
+            bar_fig = px.bar(group_df, x="Year", y="Amount", color="Category", 
+                            title="Funds Usage by Year", color_discrete_sequence=px.colors.sequential.Greens)
+        bar_fig.update_layout({"paper_bgcolor": "black", "plot_bgcolor": "black", "font_color": "white"})
+        st.plotly_chart(bar_fig)
+    
+    # Export to PDF
+    st.subheader("Export")
+    if not st.session_state.transactions.empty:
+        export_to_pdf(st.session_state.transactions)
 
-with col2:
-    st.subheader("Total Summary")
-    st.dataframe(summary_df[summary_df['Year'] == "Total"].style.format({"Budget": "{:,.0f}", "Used": "{:,.0f}", "Remaining": "{:,.0f}"}))
+# Run app only if main
+if __name__ == "__main__":
+    st.write("")
+```
 
-st.subheader("All Transactions")
-st.dataframe(df_sorted.style.format({"Amount": "{:,.0f}"}))
+### Deployment Instructions
+1. **Create a GitHub Repository**:
+   - Create a new repository (e.g., `bano-funds-tracker`).
+   - Push the following:
+     - `app.py` (above code).
+     - `requirements.txt`:
+       ```
+       streamlit
+       pandas
+       plotly
+       reportlab
+       ```
+     - Empty `transactions.csv` with headers:
+       ```
+       Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
+       ```
 
-# ---- PDF Report Generation ---- #
-def generate_pdf(transactions_df, summary_df):
-    # Charts
-    overall = summary_df[summary_df["Year"] == "Total"]
-    categories = overall["Category"].tolist()
-    used = overall["Used"].astype(float).tolist()
-    budgets = overall["Budget"].astype(float).tolist()
-    remaining = overall["Remaining"].astype(float).tolist()
+2. **Deploy to Streamlit Cloud**:
+   - Sign up at [cloud.streamlit.cloudlytics.io](https://cloud.streamlit.io).
+   - Connect your GitHub repository.
+   - Select the repository and `app.py` as the main file.
+   - Deploy the app. Streamlit Cloud will handle dependencies and hosting.
 
-    # Pie Chart
-    fig1, ax1 = plt.subplots()
-    ax1.pie(used, labels=categories, autopct='%1.1f%%')
-    ax1.axis('equal')
-    pie_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
-    fig1.savefig(pie_path)
-    plt.close(fig1)
+3. **Usage**:
+   - Access the app via the provided URL.
+   - Login with username `bano` and password `pso2025`.
+   - Add, edit, delete transactions, view summaries, and export to PDF.
 
-    # Bar Chart
-    x = range(len(categories))
-    fig2, ax2 = plt.subplots(figsize=(8, 4))
-    ax2.bar(x, budgets, width=0.25, label="Budget", color='gray')
-    ax2.bar([i + 0.25 for i in x], used, width=0.25, label="Used", color='red')
-    ax2.bar([i + 0.5 for i in x], remaining, width=0.25, label="Remaining", color='green')
-    ax2.set_xticks([i + 0.25 for i in x])
-    ax2.set_xticklabels(categories, rotation=45, ha='right')
-    ax2.legend()
-    bar_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
-    fig2.tight_layout()
-    fig2.savefig(bar_path)
-    plt.close(fig2)
+### Notes
+- **Mobile-Friendly**: Streamlit’s layout and custom CSS ensure responsiveness.
+- **Security**: The fixed login provides basic protection. For production, consider environment variables for username/password.
+- **CSV Storage**: The app reads/writes to `transactions.csv`. Ensure Streamlit Cloud supports file I/O (it does for small files).
+- **PDF Export**: ReportLab generates PDFs with tables styled to match the theme.
+- **Theme**: Black background, green buttons, white text for a sleek, readable look.
 
-    # PDF
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-
-    if os.path.exists(LOGO_FILE):
-        pdf.image(LOGO_FILE, x=80, w=50)
-        pdf.ln(10)
-
-    pdf.cell(200, 10, txt="Bano Butt – PSO Funds Report", ln=True, align='C')
-    pdf.ln(5)
-
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(200, 10, txt="Visual Summary", ln=True)
-    pdf.image(pie_path, w=160)
-    pdf.ln(5)
-    pdf.image(bar_path, w=180)
-    pdf.ln(5)
-
-    pdf.cell(200, 10, txt="Transactions", ln=True)
-    pdf.set_font("Arial", "", 9)
-    for idx, row in transactions_df.iterrows():
-        line = f"{row['Date'].strftime('%Y-%m-%d')} | {row['Description']} | PKR {row['Amount']:,.0f} | {row['Category']} | {row['Method']}"
-        pdf.multi_cell(0, 8, line)
-
-    pdf.ln(5)
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(200, 10, txt="Summary", ln=True)
-    pdf.set_font("Arial", "", 9)
-    for idx, row in summary_df.iterrows():
-        line = (
-            f"{row['Year']} – {row['Category']} | Used: PKR {row['Used']:,.0f} "
-            f"/ Budget: PKR {row['Budget']:,.0f} | Remaining: PKR {row['Remaining']:,.0f} "
-            f"({row['Remaining %']}%)"
-        )
-        pdf.multi_cell(0, 8, line)
-
-    output = BytesIO()
-    pdf.output(output)
-    output.seek(0)
-    return output
-
-# ---- Download PDF Button ---- #
-pdf_file = generate_pdf(df_sorted, summary_df)
-st.download_button("📄 Download Full Report as PDF", data=pdf_file, file_name="bano_pso_funds_report.pdf")
+If you need further assistance with deployment or additional features, let me know!
