@@ -207,7 +207,8 @@ else:
         selected_category = st.selectbox("Filter by Category", categories)
         payment_methods = ["All"] + list(df["Payment Method"].unique())
         selected_method = st.selectbox("Filter by Payment Method", payment_methods)
-        date_range = st.date_input("Date Range", [df["Receiving Date"].min(), df["Receiving Date"].max()])
+        date_range = st.date_input("Date Range", [df["Receiving Date"].min() if not df.empty else datetime.now(), 
+                                                  df["Receiving Date"].max() if not df.empty else datetime.now()])
         
         if selected_category != "All":
             df = df[df["Category"] == selected_category]
@@ -244,7 +245,7 @@ else:
                     percent_used = (edit_amount / BUDGETS[edit_category] * 100) if BUDGETS[edit_category] > 0 else 0
                     st.session_state.transactions.loc[
                         st.session_state.transactions["Sr. No"] == sr_no,
-                        ["Receiving Date", "Payment Method", "Description", "Category", "Amount", "% of Funds Used", "Notes"]]
+                        ["Receiving Date", "Payment Method", "Description", "Category", "Amount", "% of Funds Used", "Notes"]
                     ] = [
                         edit_date, edit_payment_method, edit_description, edit_category,
                         edit_amount, round(percent_used, 2), edit_notes
@@ -257,8 +258,9 @@ else:
             
             if delete_submit:
                 st.session_state.transactions = st.session_state.transactions[
-                    st.session_state.transactions["Sr. No"] != sr_no]
-                st.session_state.transactions["Sr. No"] = range(1, len(st.session_state.transactions) + 1))
+                    st.session_state.transactions["Sr. No"] != sr_no
+                ]
+                st.session_state.transactions["Sr. No"] = range(1, len(st.session_state.transactions) + 1)
                 save_transactions()
                 st.success("Transaction deleted!")
                 st.rerun()
@@ -274,7 +276,7 @@ else:
     
     # Pie chart for category spending
     pie_fig = px.pie(summary_df[:-1], values="Used (PKR)", names="Category", 
-                      title="Category-wise Funds Usage", color_discrete_sequence=px.colors.sequential.Greens)
+                     title="Category-wise Funds Usage", color_discrete_sequence=px.colors.sequential.Greens)
     pie_fig.update_layout({"paper_bgcolor": "black", "plot_bgcolor": "black", "font_color": "white"})
     st.plotly_chart(pie_fig)
     
@@ -284,14 +286,14 @@ else:
         df["Year"] = df["Receiving Date"].dt.year
         if view_type == "Quarterly":
             df["Quarter"] = df["Receiving Date"].dt.quarter
-            group_df = df.groupby(["Year", "Category"])["Amount"].sum().reset_index()
+            group_df = df.groupby(["Year", "Quarter", "Category"])["Amount"].sum().reset_index()
             group_df["Period"] = group_df["Year"].astype(str) + " Q" + group_df["Quarter"].astype(str)
             bar_fig = px.bar(group_df, x="Period", y="Amount", color="Category", 
-                            title="Funds Usage by Quarter", color_discrete_sequence=px.colors.sequential.Greens)
+                             title="Funds Usage by Quarter", color_discrete_sequence=px.colors.sequential.Greens)
         else:
             group_df = df.groupby(["Year", "Category"])["Amount"].sum().reset_index()
             bar_fig = px.bar(group_df, x="Year", y="Amount", color="Category", 
-                            title="Funds Usage by Year", color_discrete_sequence=px.colors.sequential.Greens)
+                             title="Funds Usage by Year", color_discrete_sequence=px.colors.sequential.Greens)
         bar_fig.update_layout({"paper_bgcolor": "black", "plot_bgcolor": "black", "font_color": "white"})
         st.plotly_chart(bar_fig)
     
@@ -303,41 +305,3 @@ else:
 # Run app only if main
 if __name__ == "__main__":
     st.write("")
-```
-
-### Deployment Instructions
-1. **Create a GitHub Repository**:
-   - Create a new repository (e.g., `bano-funds-tracker`).
-   - Push the following:
-     - `app.py` (above code).
-     - `requirements.txt`:
-       ```
-       streamlit
-       pandas
-       plotly
-       reportlab
-       ```
-     - Empty `transactions.csv` with headers:
-       ```
-       Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
-       ```
-
-2. **Deploy to Streamlit Cloud**:
-   - Sign up at [cloud.streamlit.cloudlytics.io](https://cloud.streamlit.io).
-   - Connect your GitHub repository.
-   - Select the repository and `app.py` as the main file.
-   - Deploy the app. Streamlit Cloud will handle dependencies and hosting.
-
-3. **Usage**:
-   - Access the app via the provided URL.
-   - Login with username `bano` and password `pso2025`.
-   - Add, edit, delete transactions, view summaries, and export to PDF.
-
-### Notes
-- **Mobile-Friendly**: Streamlit’s layout and custom CSS ensure responsiveness.
-- **Security**: The fixed login provides basic protection. For production, consider environment variables for username/password.
-- **CSV Storage**: The app reads/writes to `transactions.csv`. Ensure Streamlit Cloud supports file I/O (it does for small files).
-- **PDF Export**: ReportLab generates PDFs with tables styled to match the theme.
-- **Theme**: Black background, green buttons, white text for a sleek, readable look.
-
-If you need further assistance with deployment or additional features, let me know!
