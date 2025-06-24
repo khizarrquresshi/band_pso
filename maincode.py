@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -7,6 +8,11 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Fixed budgets
 BUDGETS = {
@@ -31,11 +37,27 @@ if 'transactions' not in st.session_state:
 
 # Load transactions from CSV
 def load_transactions():
-    if os.path.exists(CSV_FILE):
-        df = pd.read_csv(CSV_FILE)
-        df["Receiving Date"] = pd.to_datetime(df["Receiving Date"])
-        st.session_state.transactions = df
-    else:
+    try:
+        if os.path.exists(CSV_FILE):
+            df = pd.read_csv(CSV_FILE)
+            # Convert dates with error handling
+            df["Receiving Date"] = pd.to_datetime(df["Receiving Date"], errors='coerce')
+            # Log invalid dates
+            invalid_dates = df[df["Receiving Date"].isna()]
+            if not invalid_dates.empty:
+                logger.warning(f"Invalid dates found in CSV:\n{invalid_dates}")
+                st.warning(f"Found {len(invalid_dates)} invalid date entries in transactions.csv. These rows will be ignored.")
+            # Drop rows with invalid dates
+            df = df.dropna(subset=["Receiving Date"])
+            st.session_state.transactions = df
+        else:
+            st.session_state.transactions = pd.DataFrame(columns=[
+                "Sr. No", "Receiving Date", "Payment Method", "Description", 
+                "Category", "Amount", "% of Funds Used", "Notes"
+            ])
+    except Exception as e:
+        logger.error(f"Error loading transactions: {str(e)}")
+        st.error("Error loading transactions. Please check the CSV file format.")
         st.session_state.transactions = pd.DataFrame(columns=[
             "Sr. No", "Receiving Date", "Payment Method", "Description", 
             "Category", "Amount", "% of Funds Used", "Notes"
@@ -43,7 +65,14 @@ def load_transactions():
 
 # Save transactions to CSV
 def save_transactions():
-    st.session_state.transactions.to_csv(CSV_FILE, index=False)
+    try:
+        # Ensure dates are saved in YYYY-MM-DD format
+        df = st.session_state.transactions.copy()
+        df["Receiving Date"] = df["Receiving Date"].dt.strftime('%Y-%m-%d')
+        df.to_csv(CSV_FILE, index=False)
+    except Exception as e:
+        logger.error(f"Error saving transactions: {str(e)}")
+        st.error("Error saving transactions.")
 
 # Calculate summary
 def calculate_summary(df):
@@ -77,49 +106,53 @@ def calculate_summary(df):
 
 # Export to PDF
 def export_to_pdf(df):
-    pdf_file = "Bano_Funds_Tracker.pdf"
-    doc = SimpleDocTemplate(pdf_file, pagesize=letter)
-    elements = []
-    styles = getSampleStyleSheet()
-    elements.append(Paragraph("Bano Funds Tracker", styles['Title']))
-    
-    # Transactions table
-    data = [df.columns.tolist()] + df.values.tolist()
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.green),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.black),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, -1), 1, colors.green)
-    ]))
-    elements.append(table)
-    
-    # Summary table
-    summary_df = calculate_summary(df)
-    elements.append(Paragraph("Summary", styles['Heading2']))
-    data = [summary_df.columns.tolist()] + summary_df.values.tolist()
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.green),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.black),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, -1), 1, colors.green)
-    ]))
-    elements.append(table)
-    
-    doc.build(elements)
-    with open(pdf_file, 'rb') as f:
-        st.download_button("Download PDF", f, file_name=pdf_file)
+    try:
+        pdf_file = "Bano_Funds_Tracker.pdf"
+        doc = SimpleDocTemplate(pdf_file, pagesize=letter)
+        elements = []
+        styles = getSampleStyleSheet()
+        elements.append(Paragraph("Bano Funds Tracker", styles['Title']))
+        
+        # Transactions table
+        data = [df.columns.tolist()] + df.values.tolist()
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.black),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.green)
+        ]))
+        elements.append(table)
+        
+        # Summary table
+        summary_df = calculate_summary(df)
+        elements.append(Paragraph("Summary", styles['Heading2']))
+        data = [summary_df.columns.tolist()] + summary_df.values.tolist()
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.black),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.green)
+        ]))
+        elements.append(table)
+        
+        doc.build(elements)
+        with open(pdf_file, 'rb') as f:
+            st.download_button("Download PDF", f, file_name=pdf_file)
+    except Exception as e:
+        logger.error(f"Error generating PDF: {str(e)}")
+        st.error("Error generating PDF.")
 
 # Custom CSS for theme
 st.markdown("""
@@ -205,10 +238,11 @@ else:
     with st.expander("Apply Filters"):
         categories = ["All"] + list(BUDGETS.keys())
         selected_category = st.selectbox("Filter by Category", categories)
-        payment_methods = ["All"] + list(df["Payment Method"].unique())
+        payment_methods = ["All"] + list(df["Payment Method"].unique()) if not df.empty else ["All"]
         selected_method = st.selectbox("Filter by Payment Method", payment_methods)
-        date_range = st.date_input("Date Range", [df["Receiving Date"].min() if not df.empty else datetime.now(), 
-                                                  df["Receiving Date"].max() if not df.empty else datetime.now()])
+        date_range = st.date_input("Date Range", 
+                                  [df["Receiving Date"].min() if not df.empty else datetime.now(), 
+                                   df["Receiving Date"].max() if not df.empty else datetime.now()])
         
         if selected_category != "All":
             df = df[df["Category"] == selected_category]
@@ -235,7 +269,7 @@ else:
             edit_category = st.selectbox("Edit Category", list(BUDGETS.keys()), 
                                         index=list(BUDGETS.keys()).index(selected_row["Category"]))
             edit_amount = st.number_input("Edit Amount (PKR)", min_value=0.0, value=float(selected_row["Amount"]))
-            edit_notes = st.text_area("Edit Notes", selected_row["Notes"])
+            edit_notes = st.text_area("Edit Notes", selected_row["Notes"] if pd.notna(selected_row["Notes"]) else "")
             col_edit, col_delete = st.columns(2)
             edit_submit = col_edit.form_submit_button("Update Transaction")
             delete_submit = col_delete.form_submit_button("Delete Transaction")
@@ -305,3 +339,81 @@ else:
 # Run app only if main
 if __name__ == "__main__":
     st.write("")
+```
+
+### Key Changes
+1. **Robust Date Parsing**:
+   - `pd.to_datetime` now uses `errors='coerce'` to convert invalid dates to `NaT`.
+   - Rows with invalid dates are dropped, and a warning is displayed to the user.
+   - Logging captures invalid date entries for debugging.
+
+2. **Date Format Consistency**:
+   - Dates are saved to `transactions.csv` in `YYYY-MM-DD` format using `dt.strftime('%Y-%m-%d')` in `save_transactions`.
+
+3. **Error Handling**:
+   - Added try-except blocks in `load_transactions`, `save_transactions`, and `export_to_pdf` to catch and log errors, displaying user-friendly messages.
+   - Added logging to track issues in Streamlit Cloud logs.
+
+4. **Improved Filter Handling**:
+   - Ensured the date range filter defaults to the current date if the DataFrame is empty to avoid errors.
+
+5. **Notes Field Handling**:
+   - Added a check for `NaN` in the Notes field when editing to prevent errors with missing values.
+
+### Debugging the CSV
+To identify the specific issue with `transactions.csv`:
+1. **Check the CSV Content**:
+   - Download `transactions.csv` from your Streamlit Cloud app (via the "Manage app" interface or GitHub).
+   - Open it in a text editor or spreadsheet software.
+   - Look at the "Receiving Date" column for entries that don’t match a standard date format (e.g., `YYYY-MM-DD`, `DD/MM/YYYY`, or empty cells).
+
+2. **Fix the CSV**:
+   - Ensure all dates in the "Receiving Date" column are in a consistent format (e.g., `2025-06-25`).
+   - Remove or correct any invalid entries (e.g., empty cells, text like "N/A", or malformed dates).
+   - Example of a valid `transactions.csv`:
+     ```
+     Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
+     1,2025-06-01,Cheque,Ju Jitsu Asian Championship,Marketing,255000,8.5,Travel expenses
+     2,2025-06-15,Cheque,Gear Purchased,Gear and Equipment,126559,25.31,Thailand gear
+     ```
+
+3. **Recreate the CSV**:
+   - If the CSV is corrupted or has many invalid entries, replace it with an empty CSV containing only the headers:
+     ```
+     Sr. No,Receiving Date,Payment Method,Description,Category,Amount,% of Funds Used,Notes
+     ```
+   - The app will initialize an empty DataFrame and allow you to add new transactions.
+
+### Deployment Instructions
+1. **Update Your Repository**:
+   - Replace the existing `app.py` (or `maincode.py`) with the updated code above.
+   - Ensure `requirements.txt` contains:
+     ```
+     streamlit
+     pandas
+     plotly
+     reportlab
+     ```
+   - If `transactions.csv` is problematic, replace it with an empty CSV with the correct headers (as shown above).
+
+2. **Push to GitHub**:
+   - Commit and push the updated files to your GitHub repository.
+
+3. **Redeploy on Streamlit Cloud**:
+   - Log in to [Streamlit Cloud](https://cloud.streamlit.io).
+   - Go to "Manage app" for your app, trigger a redeploy, or update the repository link if needed.
+   - Check the app logs in Streamlit Cloud to see any warnings about invalid dates.
+
+4. **Test the App**:
+   - Access the app using the Streamlit Cloud URL.
+   - Log in with username `bano` and password `pso2025`.
+   - Add a test transaction to verify that dates are saved correctly.
+   - Check the logs for any warnings about invalid dates from the old CSV.
+
+### Additional Notes
+- **Login Credentials**: Use `bano` and `pso2025` to log in.
+- **Streamlit Cloud Logs**: Check the logs in "Manage app" to see details about invalid date entries (logged as warnings).
+- **Preventing Future Issues**: The updated script enforces consistent date formats when saving transactions, so new entries should not cause this error.
+- **Local Testing**: Before redeploying, test locally with `streamlit run app.py` to ensure the CSV loads correctly. If you have the problematic `transactions.csv`, test it locally to reproduce and fix the issue.
+
+If the error persists or you need help inspecting `transactions.csv`, please share the content of the CSV (or a sample of the problematic rows) or the Streamlit Cloud logs, and I’ll assist further!
